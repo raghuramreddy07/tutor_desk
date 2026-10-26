@@ -6,3 +6,45 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+enum Role {
+  OWNER
+  TEACHER
+  PARENT
+}
+
+enum Plan {
+  FREE
+  PRO
+}
+
+model User {
+  id           String       @id @default(uuid()) @db.Uuid
+  name         String
+  email        String       @unique
+  phone        String?
+  passwordHash String
+  createdAt    DateTime     @default(now())
+  memberships  Membership[]
+}
+
+model Center {
+  id          String       @id @default(uuid()) @db.Uuid
+  name        String
+  plan        Plan         @default(FREE)
+  createdAt   DateTime     @default(now())
+  memberships Membership[]
+}
+
+model Membership {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  centerId  String   @db.Uuid
+  role      Role
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, centerId])
+  @@index([centerId])
+}

@@ -8,6 +8,10 @@ const envSchema = z.object({
   JWT_SECRET: z
     .string({ error: "JWT_SECRET is required" })
     .min(32, "JWT_SECRET must be at least 32 characters long"),
+  JWT_EXPIRES_IN: z
+    .string()
+    .regex(/^[1-9]\d*(ms|s|m|h|d|w|y)$/, "JWT_EXPIRES_IN must be a positive duration")
+    .default("1d"),
 });
 
 const result = envSchema.safeParse(process.env);
