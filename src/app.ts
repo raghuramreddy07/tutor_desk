@@ -7,6 +7,12 @@ import { tenantMiddleware } from "./middleware/tenant";
 import { studentRoutes } from "./modules/students/routes";
 import { inviteRoutes } from "./modules/invites/routes";
 import { memberRoutes } from "./modules/members/routes";
+import { batchRoutes } from "./modules/batches/routes";
+import { attendanceRoutes } from "./modules/attendance/routes";
+import { examRoutes } from "./modules/exams/routes";
+import { feePlanRoutes } from "./modules/fee-plans/routes";
+import { feeRoutes, studentFeeRoutes } from "./modules/fees/routes";
+import { paymentRoutes } from "./modules/payments/routes";
 
 export const app = express();
 
@@ -40,8 +46,16 @@ app.get("/me", authMiddleware, tenantMiddleware, async (req, res) => {
 });
 
 app.use("/students", studentRoutes);
+app.use("/students", studentFeeRoutes);
 app.use("/invites", inviteRoutes);
 app.use("/members", memberRoutes);
+app.use("/batches", batchRoutes);
+app.use(attendanceRoutes);
+app.use(examRoutes);
+app.use("/fee-plans", feePlanRoutes);
+app.use("/fees", feeRoutes);
+app.use("/payments", paymentRoutes);
+
 
 app.use(notFound);
 app.use(globalErrorHandler);

@@ -20,6 +20,7 @@ let studentBId: string;
 const userEmails: string[] = [];
 const centerIds: string[] = [];
 const teacherTokensByCenter = new Map<string, string>();
+const teacherUserIdsByCenter = new Map<string, string>();
 
 const signup = async (label: string): Promise<TestCenter> => {
   const email = `roles-${label}-${randomUUID()}@example.test`;
@@ -100,6 +101,41 @@ const createMember = async (
       teacherToken = teacher.token;
       teacherTokensByCenter.set(center.centerId, teacherToken);
     }
+    const teacherUserId = teacherUserIdsByCenter.get(center.centerId);
+    if (!teacherUserId) {
+      throw new Error("Parent invitations require a known teacher membership");
+    }
+    let batch = await ownerPrisma.batch.findFirst({
+      where: {
+        centerId: center.centerId,
+        teachers: { some: { centerId: center.centerId, userId: teacherUserId } },
+      },
+      select: { id: true },
+    });
+    if (!batch) {
+      batch = await ownerPrisma.batch.create({
+        data: {
+          centerId: center.centerId,
+          name: `Roles invite batch ${randomUUID()}`,
+          teachers: {
+            create: {
+              userId: teacherUserId,
+            },
+          },
+        },
+        select: { id: true },
+      });
+    }
+    if (input.studentId) {
+      await ownerPrisma.batchStudent.createMany({
+        data: [{
+          centerId: center.centerId,
+          batchId: batch.id,
+          studentId: input.studentId,
+        }],
+        skipDuplicates: true,
+      });
+    }
     inviter = { ...center, accessToken: teacherToken };
   }
 
@@ -125,6 +161,23 @@ const createMember = async (
     where: { email: input.email },
     select: { id: true },
   });
+  if (input.role === "TEACHER") {
+    teacherUserIdsByCenter.set(center.centerId, member.id);
+    const batch = await ownerPrisma.batch.create({
+      data: {
+        centerId: center.centerId,
+        name: `Roles teacher batch ${randomUUID()}`,
+      },
+      select: { id: true },
+    });
+    await ownerPrisma.batchTeacher.create({
+      data: {
+        centerId: center.centerId,
+        batchId: batch.id,
+        userId: member.id,
+      },
+    });
+  }
   return { token: accepted.body.accessToken as string, userId: member.id };
 };
 
@@ -492,6 +545,20 @@ describe("invite acceptance", () => {
       });
     expect(outsideStudent.status).toBe(404);
     expect(outsideStudent.body.error.code).toBe("NOT_FOUND");
+
+    const unassignedStudent = await ownerPrisma.student.create({
+      data: { centerId: centerA.centerId, name: "Unassigned invitation student" },
+    });
+    const unassignedInvite = await request(app)
+      .post("/invites")
+      .set("Authorization", ["Bearer", teacher.token].join(" "))
+      .send({
+        email: `unassigned-student-parent-${randomUUID()}@example.test`,
+        role: "PARENT",
+        studentId: unassignedStudent.id,
+      });
+    expect(unassignedInvite.status).toBe(404);
+    expect(unassignedInvite.body.error.code).toBe("NOT_FOUND");
   });
 
   it("allows teachers to use students while denying parents and member management", async () => {
@@ -609,6 +676,17 @@ describe("invite acceptance", () => {
       email: `teacher-invites-${randomUUID()}@example.test`,
       role: "TEACHER",
     });
+    const assignedBatch = await ownerPrisma.batchTeacher.findFirstOrThrow({
+      where: { centerId: centerA.centerId, userId: teacher.userId },
+      select: { batchId: true },
+    });
+    await ownerPrisma.batchStudent.create({
+      data: {
+        centerId: centerA.centerId,
+        batchId: assignedBatch.batchId,
+        studentId: studentAId,
+      },
+    });
     const ownerInvite = await authorized(centerA).post("/invites").send({
       email: `owner-created-invite-${randomUUID()}@example.test`,
       role: "TEACHER",
@@ -660,6 +738,21 @@ describe("invite acceptance", () => {
     });
     const secondStudent = await ownerPrisma.student.create({
       data: { centerId: centerA.centerId, name: "Second parent student" },
+    });
+    const teacherUserId = teacherUserIdsByCenter.get(centerA.centerId);
+    if (!teacherUserId) {
+      throw new Error("Expected an existing teacher membership");
+    }
+    const assignedBatch = await ownerPrisma.batchTeacher.findFirstOrThrow({
+      where: { centerId: centerA.centerId, userId: teacherUserId },
+      select: { batchId: true },
+    });
+    await ownerPrisma.batchStudent.create({
+      data: {
+        centerId: centerA.centerId,
+        batchId: assignedBatch.batchId,
+        studentId: secondStudent.id,
+      },
     });
 
     const teacherToken = teacherTokensByCenter.get(centerA.centerId);

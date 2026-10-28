@@ -34,6 +34,10 @@ model User {
   memberships  Membership[]
   sentInvites  Invite[]     @relation("InviteInviter")
   parentLinks  ParentStudent[]
+  attendanceMarks Attendance[]
+  waivedCharges FeeCharge[] @relation("FeeChargeWaiver")
+  recordedPayments Payment[] @relation("PaymentRecorder")
+  voidedPayments Payment[] @relation("PaymentVoider")
 }
 
 model Center {
@@ -45,19 +49,30 @@ model Center {
   students    Student[]
   invites     Invite[]
   parentLinks ParentStudent[]
+  batches     Batch[]
+  feePlans    FeePlan[]
+  studentFees StudentFee[]
+  feeCharges  FeeCharge[]
+  payments    Payment[]
+  paymentAllocations PaymentAllocation[]
+  counters    CenterCounter[]
 }
 
 model Student {
-  id        String   @id @default(uuid()) @db.Uuid
-  centerId  String   @db.Uuid
-  name      String
-  grade     String?
-  phone     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  invites   Invite[]
-  parentLinks ParentStudent[]
+  id            String          @id @default(uuid()) @db.Uuid
+  centerId      String          @db.Uuid
+  name          String
+  grade         String?
+  phone         String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  center        Center          @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  invites       Invite[]
+  parentLinks   ParentStudent[]
+  enrollments   BatchStudent[]
+  examResults   ExamResult[]
+  studentFees   StudentFee[]
+  payments      Payment[]
 
   @@unique([centerId, id])
   @@index([centerId])
@@ -82,6 +97,111 @@ model Invite {
   @@index([centerId])
 }
 
+model Batch {
+  id          String          @id @default(uuid()) @db.Uuid
+  centerId    String          @db.Uuid
+  name        String
+  subject     String?
+  schedule    String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  center      Center          @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  teachers    BatchTeacher[]
+  enrollments BatchStudent[]
+  exams       Exam[]
+  feePlans    FeePlan[]
+
+  @@unique([centerId, id])
+  @@index([centerId])
+}
+
+model BatchTeacher {
+  id        String     @id @default(uuid()) @db.Uuid
+  centerId  String     @db.Uuid
+  batchId   String     @db.Uuid
+  userId    String     @db.Uuid
+  createdAt DateTime   @default(now())
+  batch     Batch      @relation(fields: [centerId, batchId], references: [centerId, id], onDelete: Cascade)
+  membership Membership @relation(fields: [centerId, userId], references: [centerId, userId], onDelete: Cascade)
+
+  @@unique([batchId, userId])
+  @@index([centerId])
+  @@index([centerId, userId])
+}
+
+model BatchStudent {
+  id        String       @id @default(uuid()) @db.Uuid
+  centerId  String       @db.Uuid
+  batchId   String       @db.Uuid
+  studentId String       @db.Uuid
+  enrolledAt DateTime    @default(now())
+  batch     Batch        @relation(fields: [centerId, batchId], references: [centerId, id], onDelete: Cascade)
+  student   Student      @relation(fields: [centerId, studentId], references: [centerId, id], onDelete: Cascade)
+  attendance Attendance[]
+
+  @@unique([batchId, studentId])
+  @@unique([centerId, batchId, studentId])
+  @@index([centerId])
+  @@index([centerId, studentId])
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+}
+
+model Attendance {
+  id             String           @id @default(uuid()) @db.Uuid
+  centerId       String           @db.Uuid
+  batchId        String           @db.Uuid
+  studentId      String           @db.Uuid
+  date           DateTime         @db.Date
+  status         AttendanceStatus
+  markedByUserId String           @db.Uuid
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  enrollment     BatchStudent     @relation(fields: [centerId, batchId, studentId], references: [centerId, batchId, studentId], onDelete: Restrict)
+  markedBy      User             @relation(fields: [markedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([batchId, studentId, date])
+  @@index([centerId])
+  @@index([centerId, batchId, date])
+  @@index([centerId, studentId, date])
+}
+
+model Exam {
+  id        String        @id @default(uuid()) @db.Uuid
+  centerId  String        @db.Uuid
+  batchId   String        @db.Uuid
+  name      String
+  maxMarks  Int
+  date      DateTime      @db.Date
+  createdAt DateTime      @default(now())
+  batch     Batch         @relation(fields: [centerId, batchId], references: [centerId, id], onDelete: Restrict)
+  results   ExamResult[]
+
+  @@unique([centerId, id])
+  @@index([centerId])
+  @@index([centerId, batchId, date])
+}
+
+model ExamResult {
+  id        String   @id @default(uuid()) @db.Uuid
+  centerId  String   @db.Uuid
+  examId    String   @db.Uuid
+  studentId String   @db.Uuid
+  marks     Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  exam      Exam     @relation(fields: [centerId, examId], references: [centerId, id], onDelete: Cascade)
+  student   Student  @relation(fields: [centerId, studentId], references: [centerId, id], onDelete: Cascade)
+
+  @@unique([examId, studentId])
+  @@index([centerId])
+  @@index([centerId, studentId])
+}
+
 model ParentStudent {
   id        String   @id @default(uuid()) @db.Uuid
   centerId  String   @db.Uuid
@@ -104,7 +224,143 @@ model Membership {
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  batchAssignments BatchTeacher[]
 
   @@unique([userId, centerId])
+  @@unique([centerId, userId])
+  @@index([centerId])
+}
+
+enum FeeFrequency {
+  MONTHLY
+  ONE_TIME
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+  CARD
+  BANK_TRANSFER
+  OTHER
+}
+
+model FeePlan {
+  id            String       @id @default(uuid()) @db.Uuid
+  centerId      String       @db.Uuid
+  batchId       String       @db.Uuid
+  name          String
+  amountPaise   BigInt       @db.BigInt
+  frequency     FeeFrequency
+  dueDay        Int?
+  isActive      Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  center        Center       @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  batch         Batch        @relation(fields: [centerId, batchId], references: [centerId, id], onDelete: Restrict)
+  studentFees   StudentFee[]
+
+  @@unique([centerId, id])
+  @@index([centerId])
+  @@index([centerId, batchId])
+}
+
+model StudentFee {
+  id                 String      @id @default(uuid()) @db.Uuid
+  centerId           String      @db.Uuid
+  studentId          String      @db.Uuid
+  feePlanId          String      @db.Uuid
+  customAmountPaise  BigInt?     @db.BigInt
+  startDate          DateTime    @db.Date
+  endDate            DateTime?   @db.Date
+  createdAt          DateTime    @default(now())
+  center             Center      @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  student            Student     @relation(fields: [centerId, studentId], references: [centerId, id], onDelete: Restrict)
+  feePlan            FeePlan     @relation(fields: [centerId, feePlanId], references: [centerId, id], onDelete: Restrict)
+  charges            FeeCharge[]
+
+  @@unique([centerId, id])
+  @@unique([centerId, id, studentId])
+  @@index([centerId])
+  @@index([centerId, studentId])
+  @@index([centerId, feePlanId])
+}
+
+model FeeCharge {
+  id              String            @id @default(uuid()) @db.Uuid
+  centerId        String            @db.Uuid
+  studentId       String            @db.Uuid
+  studentFeeId    String            @db.Uuid
+  periodStart     DateTime          @db.Date
+  dueDate         DateTime          @db.Date
+  amountPaise     BigInt            @db.BigInt
+  description     String
+  waivedAt        DateTime?
+  waivedByUserId  String?           @db.Uuid
+  waiveReason     String?
+  createdAt       DateTime          @default(now())
+  center          Center            @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  studentFee      StudentFee        @relation(fields: [centerId, studentFeeId, studentId], references: [centerId, id, studentId], onDelete: Restrict)
+  waivedBy        User?             @relation("FeeChargeWaiver", fields: [waivedByUserId], references: [id], onDelete: Restrict)
+  allocations     PaymentAllocation[]
+
+  @@unique([centerId, id])
+  @@unique([studentFeeId, periodStart])
+  @@index([centerId])
+  @@index([centerId, studentId, dueDate])
+  @@index([centerId, dueDate])
+}
+
+model Payment {
+  id                String             @id @default(uuid()) @db.Uuid
+  centerId          String             @db.Uuid
+  studentId         String             @db.Uuid
+  amountPaise       BigInt             @db.BigInt
+  paidOn            DateTime           @db.Date
+  method            PaymentMethod
+  reference         String?
+  receiptNumber     String
+  idempotencyKey    String?
+  recordedByUserId  String             @db.Uuid
+  voidedAt          DateTime?
+  voidedByUserId    String?            @db.Uuid
+  voidReason        String?
+  createdAt         DateTime           @default(now())
+  center            Center             @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  student           Student            @relation(fields: [centerId, studentId], references: [centerId, id], onDelete: Restrict)
+  recordedBy        User               @relation("PaymentRecorder", fields: [recordedByUserId], references: [id], onDelete: Restrict)
+  voidedBy          User?              @relation("PaymentVoider", fields: [voidedByUserId], references: [id], onDelete: Restrict)
+  allocations       PaymentAllocation[]
+
+  @@unique([centerId, id])
+  @@unique([centerId, receiptNumber])
+  @@unique([centerId, idempotencyKey])
+  @@index([centerId])
+  @@index([centerId, studentId, paidOn])
+  @@index([centerId, paidOn])
+}
+
+model PaymentAllocation {
+  id            String     @id @default(uuid()) @db.Uuid
+  centerId      String     @db.Uuid
+  paymentId     String     @db.Uuid
+  chargeId      String     @db.Uuid
+  amountPaise   BigInt     @db.BigInt
+  center        Center     @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  payment       Payment    @relation(fields: [centerId, paymentId], references: [centerId, id], onDelete: Restrict)
+  charge        FeeCharge  @relation(fields: [centerId, chargeId], references: [centerId, id], onDelete: Restrict)
+
+  @@unique([centerId, paymentId, chargeId])
+  @@index([centerId])
+  @@index([centerId, paymentId])
+  @@index([centerId, chargeId])
+}
+
+model CenterCounter {
+  centerId  String   @db.Uuid
+  name      String
+  value     BigInt   @default(0) @db.BigInt
+  center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
+
+  @@id([centerId, name])
   @@index([centerId])
 }

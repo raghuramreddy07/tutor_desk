@@ -41,13 +41,32 @@ export const createInvite = async (
   try {
     return await withTenant(centerId, async (transaction) => {
       if (input.role === InviteRole.PARENT) {
-        // TODO (Phase 4): restrict teachers to students in their own batches.
         const student = await transaction.student.findFirst({
           where: { id: input.studentId, centerId },
           select: { id: true },
         });
         if (!student) {
           throw studentNotFound();
+        }
+        if (inviterRole === "TEACHER") {
+          const assignedBatchEnrollment = await transaction.batchStudent.findFirst({
+            where: {
+              centerId,
+              studentId: student.id,
+              batch: {
+                is: {
+                  centerId,
+                  teachers: {
+                    some: { centerId, userId: invitedByUserId },
+                  },
+                },
+              },
+            },
+            select: { id: true },
+          });
+          if (!assignedBatchEnrollment) {
+            throw studentNotFound();
+          }
         }
       }
 
