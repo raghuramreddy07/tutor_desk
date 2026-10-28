@@ -13,6 +13,7 @@ import { examRoutes } from "./modules/exams/routes";
 import { feePlanRoutes } from "./modules/fee-plans/routes";
 import { feeRoutes, studentFeeRoutes } from "./modules/fees/routes";
 import { paymentRoutes } from "./modules/payments/routes";
+import { parentRoutes } from "./modules/parent/routes";
 
 export const app = express();
 
@@ -55,6 +56,7 @@ app.use(examRoutes);
 app.use("/fee-plans", feePlanRoutes);
 app.use("/fees", feeRoutes);
 app.use("/payments", paymentRoutes);
+app.use("/parent", parentRoutes);
 
 
 app.use(notFound);
