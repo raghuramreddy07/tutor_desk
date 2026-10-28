@@ -19,6 +19,7 @@ beforeAll(async () => {
   process.env.DATABASE_URL ??=
     "postgresql://tutordesk:tutordesk_dev_password@localhost:5432/tutor_desk?schema=public";
   process.env.JWT_SECRET ??= "test-jwt-secret-that-is-at-least-32-chars";
+  process.env.APP_URL ??= "http://localhost:3000";
 
   ({ app } = await import("../src/app"));
 });

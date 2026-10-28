@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
+import { withInviteToken } from "../../lib/tenantDb";
 import {
   createAccessToken,
   createSelectionToken,
@@ -12,10 +14,17 @@ import {
 } from "../../lib/password";
 import { AppError } from "../../middleware/errors";
 import type {
+  AcceptInviteInput,
   LoginInput,
   SelectCenterInput,
   SignupCenterInput,
 } from "./schemas";
+
+const invalidCredentials = (): AppError =>
+  new AppError(401, "INVALID_CREDENTIALS", "Invalid email or password");
+
+const invalidInvite = (): AppError =>
+  new AppError(400, "INVALID_INVITE", "Invite is invalid or expired");
 
 export const signupCenter = async (input: SignupCenterInput) => {
   const passwordHash = await hashPassword(input.password);
@@ -146,4 +155,138 @@ export const selectCenter = async (input: SelectCenterInput) => {
       role: membership.role,
     }),
   };
+};
+
+export const acceptInvite = async (input: AcceptInviteInput) => {
+  const tokenHash = createHash("sha256").update(input.token).digest("hex");
+
+  try {
+    const accepted = await withInviteToken(tokenHash, async (transaction) => {
+      const invite = await transaction.invite.findUnique({
+        where: { tokenHash },
+      });
+
+      if (!invite) {
+        throw invalidInvite();
+      }
+
+      await transaction.$queryRaw`
+        SELECT set_config('app.current_center', ${invite.centerId}, true)
+      `;
+
+      const lockedInvites = await transaction.$queryRaw<Array<{ id: string }>>`
+        SELECT "id"
+        FROM "Invite"
+        WHERE "id" = ${invite.id}::uuid
+          AND "centerId" = ${invite.centerId}::uuid
+        FOR UPDATE
+      `;
+      if (lockedInvites.length === 0) {
+        throw invalidInvite();
+      }
+
+      const currentInvite = await transaction.invite.findFirst({
+        where: { id: invite.id, centerId: invite.centerId },
+      });
+      const now = new Date();
+      if (
+        !currentInvite ||
+        currentInvite.acceptedAt ||
+        currentInvite.revokedAt ||
+        currentInvite.expiresAt <= now
+      ) {
+        throw invalidInvite();
+      }
+
+      const existingUser = await transaction.user.findUnique({
+        where: { email: currentInvite.email },
+      });
+      let userId: string;
+      if (existingUser) {
+        if (!(await verifyPassword(input.password, existingUser.passwordHash))) {
+          throw invalidCredentials();
+        }
+        userId = existingUser.id;
+      } else {
+        if (!input.name) {
+          await verifyPassword(input.password, DUMMY_PASSWORD_HASH);
+          throw invalidCredentials();
+        }
+        const passwordHash = await hashPassword(input.password);
+        const user = await transaction.user.create({
+          data: {
+            name: input.name,
+            email: currentInvite.email,
+            passwordHash,
+          },
+          select: { id: true },
+        });
+        userId = user.id;
+      }
+
+      const claimed = await transaction.invite.updateMany({
+        where: {
+          id: currentInvite.id,
+          centerId: currentInvite.centerId,
+          acceptedAt: null,
+          revokedAt: null,
+          expiresAt: { gt: now },
+        },
+        data: { acceptedAt: now },
+      });
+      if (claimed.count !== 1) {
+        throw invalidInvite();
+      }
+
+      await transaction.membership.create({
+        data: {
+          userId,
+          centerId: currentInvite.centerId,
+          role: currentInvite.role,
+        },
+      });
+
+      if (currentInvite.role === "PARENT") {
+        if (!currentInvite.studentId) {
+          throw invalidInvite();
+        }
+        await transaction.parentStudent.create({
+          data: {
+            centerId: currentInvite.centerId,
+            userId,
+            studentId: currentInvite.studentId,
+          },
+        });
+      }
+
+      const center = await transaction.center.findUniqueOrThrow({
+        where: { id: currentInvite.centerId },
+        select: { id: true, name: true },
+      });
+
+      return {
+        userId,
+        center,
+        role: currentInvite.role,
+      };
+    });
+
+    return {
+      center: accepted.center,
+      role: accepted.role,
+      accessToken: createAccessToken({
+        userId: accepted.userId,
+        centerId: accepted.center.id,
+        role: accepted.role,
+      }),
+    };
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      throw new AppError(409, "ALREADY_MEMBER", "This user is already a member of the center");
+    }
+    throw error;
+  }
 };

@@ -18,6 +18,13 @@ export const selectCenterSchema = z.object({
   centerId: z.string().uuid(),
 });
 
+export const acceptInviteSchema = z.object({
+  token: z.string().regex(/^[A-Za-z0-9_-]{43,128}$/),
+  name: z.string().trim().min(1).optional(),
+  password: z.string().min(8),
+});
+
 export type SignupCenterInput = z.infer<typeof signupCenterSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type SelectCenterInput = z.infer<typeof selectCenterSchema>;
+export type AcceptInviteInput = z.infer<typeof acceptInviteSchema>;

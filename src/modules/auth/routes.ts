@@ -1,11 +1,13 @@
 import { Router, type RequestHandler } from "express";
 import { AppError } from "../../middleware/errors";
 import {
+  acceptInvite,
   login,
   selectCenter,
   signupCenter,
 } from "./service";
 import {
+  acceptInviteSchema,
   loginSchema,
   selectCenterSchema,
   signupCenterSchema,
@@ -39,4 +41,12 @@ authRoutes.post("/select-center", (async (req, res) => {
     throw validationError();
   }
   res.status(200).json(await selectCenter(parsed.data));
+}) satisfies RequestHandler);
+
+authRoutes.post("/accept-invite", (async (req, res) => {
+  const parsed = acceptInviteSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw validationError();
+  }
+  res.status(200).json(await acceptInvite(parsed.data));
 }) satisfies RequestHandler);

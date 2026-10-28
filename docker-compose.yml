@@ -6,10 +6,12 @@ services:
       POSTGRES_USER: tutordesk
       POSTGRES_PASSWORD: tutordesk_dev_password
       POSTGRES_DB: tutor_desk
+      TUTORDESK_APP_PASSWORD: ${TUTORDESK_APP_PASSWORD:?Set TUTORDESK_APP_PASSWORD in .env}
     ports:
       - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U tutordesk -d tutor_desk"]
       interval: 5s

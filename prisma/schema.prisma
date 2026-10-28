@@ -5,6 +5,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 enum Role {
@@ -18,6 +19,11 @@ enum Plan {
   PRO
 }
 
+enum InviteRole {
+  TEACHER
+  PARENT
+}
+
 model User {
   id           String       @id @default(uuid()) @db.Uuid
   name         String
@@ -26,6 +32,8 @@ model User {
   passwordHash String
   createdAt    DateTime     @default(now())
   memberships  Membership[]
+  sentInvites  Invite[]     @relation("InviteInviter")
+  parentLinks  ParentStudent[]
 }
 
 model Center {
@@ -34,6 +42,58 @@ model Center {
   plan        Plan         @default(FREE)
   createdAt   DateTime     @default(now())
   memberships Membership[]
+  students    Student[]
+  invites     Invite[]
+  parentLinks ParentStudent[]
+}
+
+model Student {
+  id        String   @id @default(uuid()) @db.Uuid
+  centerId  String   @db.Uuid
+  name      String
+  grade     String?
+  phone     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  invites   Invite[]
+  parentLinks ParentStudent[]
+
+  @@unique([centerId, id])
+  @@index([centerId])
+}
+
+model Invite {
+  id              String      @id @default(uuid()) @db.Uuid
+  centerId        String      @db.Uuid
+  invitedByUserId String      @db.Uuid
+  email           String
+  role            InviteRole
+  studentId       String?     @db.Uuid
+  tokenHash       String      @unique
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime    @default(now())
+  center          Center      @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  invitedBy       User        @relation("InviteInviter", fields: [invitedByUserId], references: [id], onDelete: Cascade)
+  student         Student?    @relation(fields: [centerId, studentId], references: [centerId, id], onDelete: Cascade)
+
+  @@index([centerId])
+}
+
+model ParentStudent {
+  id        String   @id @default(uuid()) @db.Uuid
+  centerId  String   @db.Uuid
+  userId    String   @db.Uuid
+  studentId String   @db.Uuid
+  createdAt DateTime @default(now())
+  center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  student   Student  @relation(fields: [centerId, studentId], references: [centerId, id], onDelete: Cascade)
+
+  @@unique([userId, studentId])
+  @@index([centerId])
 }
 
 model Membership {

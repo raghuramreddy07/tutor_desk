@@ -4,6 +4,9 @@ import { globalErrorHandler, notFound } from "./middleware/errors";
 import { authRoutes } from "./modules/auth/routes";
 import { authMiddleware } from "./middleware/auth";
 import { tenantMiddleware } from "./middleware/tenant";
+import { studentRoutes } from "./modules/students/routes";
+import { inviteRoutes } from "./modules/invites/routes";
+import { memberRoutes } from "./modules/members/routes";
 
 export const app = express();
 
@@ -35,6 +38,10 @@ app.get("/me", authMiddleware, tenantMiddleware, async (req, res) => {
 
   res.status(200).json({ user, center, role: req.auth.role });
 });
+
+app.use("/students", studentRoutes);
+app.use("/invites", inviteRoutes);
+app.use("/members", memberRoutes);
 
 app.use(notFound);
 app.use(globalErrorHandler);
