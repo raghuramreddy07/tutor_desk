@@ -14,9 +14,16 @@ import { feePlanRoutes } from "./modules/fee-plans/routes";
 import { feeRoutes, studentFeeRoutes } from "./modules/fees/routes";
 import { paymentRoutes } from "./modules/payments/routes";
 import { parentRoutes } from "./modules/parent/routes";
+import { planRoutes } from "./modules/plan/routes";
+import { notificationRoutes } from "./modules/notifications/routes";
+import { jobRoutes } from "./modules/jobs/routes";
+import { env } from "./config/env";
+import { globalIpRateLimit } from "./middleware/rateLimit";
 
 export const app = express();
 
+app.set("trust proxy", env.TRUST_PROXY);
+app.use(globalIpRateLimit);
 app.use(express.json());
 
 app.get("/health", async (_req, res) => {
@@ -57,6 +64,9 @@ app.use("/fee-plans", feePlanRoutes);
 app.use("/fees", feeRoutes);
 app.use("/payments", paymentRoutes);
 app.use("/parent", parentRoutes);
+app.use("/plan", planRoutes);
+app.use("/notifications", notificationRoutes);
+app.use("/jobs", jobRoutes);
 
 
 app.use(notFound);

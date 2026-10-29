@@ -1,8 +1,12 @@
 import type { RequestHandler } from "express";
 import { verifyAccessToken } from "../lib/jwt";
 import { AppError } from "./errors";
+import {
+  authenticatedUserRateLimit,
+  enforceRateLimitsOnce,
+} from "./rateLimit";
 
-export const authMiddleware: RequestHandler = (req, _res, next) => {
+export const authMiddleware: RequestHandler = async (req, res, next) => {
   const authorization = req.get("authorization");
   const match = authorization?.match(/^Bearer ([^\s]+)$/i);
 
@@ -11,15 +15,24 @@ export const authMiddleware: RequestHandler = (req, _res, next) => {
     return;
   }
 
+  let payload: ReturnType<typeof verifyAccessToken>;
   try {
-    const payload = verifyAccessToken(match[1]);
-    req.auth = {
-      userId: payload.userId,
-      centerId: payload.centerId,
-      role: payload.role,
-    };
-    next();
+    payload = verifyAccessToken(match[1]);
   } catch {
     next(new AppError(401, "UNAUTHORIZED", "Authentication required"));
+    return;
   }
+
+  req.auth = {
+    userId: payload.userId,
+    centerId: payload.centerId,
+    role: payload.role,
+  };
+  await enforceRateLimitsOnce(
+    req,
+    res,
+    "authenticated-user",
+    authenticatedUserRateLimit(req),
+  );
+  next();
 };

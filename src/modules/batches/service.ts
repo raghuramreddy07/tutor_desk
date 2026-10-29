@@ -2,6 +2,7 @@ import type { Role } from "@prisma/client";
 import { accessibleBatchWhere, requireAccessibleBatch } from "../../lib/batchAccess";
 import { withTenant } from "../../lib/tenantDb";
 import { AppError } from "../../middleware/errors";
+import { assertWithinPlanLimit } from "../../lib/planLimits";
 import type {
   CreateBatchInput,
   EnrollStudentsInput,
@@ -30,9 +31,10 @@ const invalidStudents = (studentIds: string[]): AppError =>
   );
 
 export const createBatch = (centerId: string, input: CreateBatchInput) =>
-  withTenant(centerId, (transaction) =>
-    transaction.batch.create({ data: { ...input, centerId } }),
-  );
+  withTenant(centerId, async (transaction) => {
+    await assertWithinPlanLimit(transaction, centerId, "batches");
+    return transaction.batch.create({ data: { ...input, centerId } });
+  });
 
 export const listBatches = (
   actor: BatchActor,

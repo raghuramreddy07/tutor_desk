@@ -7,6 +7,16 @@ const envSchema = z.object({
   DATABASE_URL: z.string().url("DATABASE_URL must be a valid URL"),
   DIRECT_URL: z.string().url("DIRECT_URL must be a valid URL"),
   APP_URL: z.string().url("APP_URL must be a valid URL"),
+  REDIS_URL: z.string().url("REDIS_URL must be a valid URL"),
+  JOB_SCHEDULE_CRON: z.string().default("0 2 * * *"),
+  RATE_LIMIT_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true"),
+  TRUST_PROXY: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
   JWT_SECRET: z
     .string({ error: "JWT_SECRET is required" })
     .min(32, "JWT_SECRET must be at least 32 characters long"),

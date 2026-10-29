@@ -1,8 +1,10 @@
 import type { RequestHandler } from "express";
 import { prisma } from "../lib/prisma";
 import { AppError } from "./errors";
+import { centerRateLimit, enforceRateLimitsOnce } from "./rateLimit";
+import { PLAN_LIMITS } from "../config/plans";
 
-export const tenantMiddleware: RequestHandler = async (req, _res, next) => {
+export const tenantMiddleware: RequestHandler = async (req, res, next) => {
   const membership = await prisma.membership.findUnique({
     where: {
       userId_centerId: {
@@ -10,7 +12,7 @@ export const tenantMiddleware: RequestHandler = async (req, _res, next) => {
         centerId: req.auth.centerId,
       },
     },
-    select: { role: true },
+    select: { role: true, center: { select: { plan: true } } },
   });
 
   if (!membership) {
@@ -25,5 +27,15 @@ export const tenantMiddleware: RequestHandler = async (req, _res, next) => {
   }
 
   req.auth.role = membership.role;
+  await enforceRateLimitsOnce(
+    req,
+    res,
+    "center",
+    centerRateLimit(
+      req,
+      membership.center.plan,
+      PLAN_LIMITS[membership.center.plan].requestsPerMinute,
+    ),
+  );
   next();
 };

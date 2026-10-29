@@ -1,4 +1,5 @@
 import { AppError } from "../../middleware/errors";
+import { assertWithinPlanLimit } from "../../lib/planLimits";
 import { withTenant } from "../../lib/tenantDb";
 import type {
   CreateStudentInput,
@@ -13,14 +14,15 @@ export const createStudent = (
   centerId: string,
   input: CreateStudentInput,
 ) =>
-  withTenant(centerId, (transaction) =>
-    transaction.student.create({
+  withTenant(centerId, async (transaction) => {
+    await assertWithinPlanLimit(transaction, centerId, "students");
+    return transaction.student.create({
       data: {
         ...input,
         centerId,
       },
-    }),
-  );
+    });
+  });
 
 export const listStudents = (
   centerId: string,

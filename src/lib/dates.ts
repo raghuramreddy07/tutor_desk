@@ -34,3 +34,14 @@ export const latestAllowedChargeMonth = (now = new Date()): string => {
   );
   return `${nextMonth.getUTCFullYear()}-${String(nextMonth.getUTCMonth() + 1).padStart(2, "0")}`;
 };
+
+export const isoWeekInBusinessTimeZone = (date: string): string => {
+  const value = calendarDateToUtc(date);
+  const day = value.getUTCDay() || 7;
+  value.setUTCDate(value.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(value.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(
+    ((value.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7,
+  );
+  return `${value.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+};

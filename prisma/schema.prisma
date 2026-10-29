@@ -19,6 +19,21 @@ enum Plan {
   PRO
 }
 
+enum NotificationType {
+  FEE_REMINDER
+}
+
+enum NotificationChannel {
+  LOG
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
 enum InviteRole {
   TEACHER
   PARENT
@@ -38,6 +53,7 @@ model User {
   waivedCharges FeeCharge[] @relation("FeeChargeWaiver")
   recordedPayments Payment[] @relation("PaymentRecorder")
   voidedPayments Payment[] @relation("PaymentVoider")
+  notifications Notification[] @relation("NotificationParent")
 }
 
 model Center {
@@ -56,6 +72,7 @@ model Center {
   payments    Payment[]
   paymentAllocations PaymentAllocation[]
   counters    CenterCounter[]
+  notifications Notification[]
 }
 
 model Student {
@@ -73,6 +90,7 @@ model Student {
   examResults   ExamResult[]
   studentFees   StudentFee[]
   payments      Payment[]
+  notifications Notification[]
 
   @@unique([centerId, id])
   @@index([centerId])
@@ -363,4 +381,29 @@ model CenterCounter {
 
   @@id([centerId, name])
   @@index([centerId])
+}
+
+model Notification {
+  id            String              @id @default(uuid()) @db.Uuid
+  centerId      String              @db.Uuid
+  studentId     String              @db.Uuid
+  parentUserId  String?             @db.Uuid
+  type          NotificationType
+  channel       NotificationChannel
+  status        NotificationStatus  @default(PENDING)
+  payload       Json
+  dedupeKey     String
+  createdAt     DateTime            @default(now())
+  sentAt        DateTime?
+  error         String?
+  skippedReason String?
+  center        Center              @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  student       Student             @relation(fields: [centerId, studentId], references: [centerId, id], onDelete: Cascade)
+  parent        User?               @relation("NotificationParent", fields: [parentUserId], references: [id], onDelete: SetNull)
+
+  @@unique([centerId, id])
+  @@unique([centerId, dedupeKey])
+  @@index([centerId])
+  @@index([centerId, status, createdAt])
+  @@index([centerId, studentId])
 }

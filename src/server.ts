@@ -1,6 +1,8 @@
 import { app } from "./app";
 import { env } from "./config/env";
 import { prisma } from "./lib/prisma";
+import { closeJobQueue } from "./jobs/queues";
+import { redis } from "./lib/redis";
 
 const server = app.listen(env.PORT, () => {
   console.log(`TutorDesk API listening on port ${env.PORT}`);
@@ -22,11 +24,10 @@ const shutdown = (signal: NodeJS.Signals): void => {
       process.exitCode = 1;
     }
 
-    void prisma
-      .$disconnect()
+    void Promise.all([prisma.$disconnect(), closeJobQueue(), redis.quit()])
       .then(() => {
         if (!error) {
-          console.log("Prisma disconnected");
+          console.log("Prisma and Redis disconnected");
         }
       })
       .catch((disconnectError: unknown) => {

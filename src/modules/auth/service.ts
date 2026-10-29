@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { withInviteToken } from "../../lib/tenantDb";
+import { assertWithinPlanLimit } from "../../lib/planLimits";
 import {
   createAccessToken,
   createSelectionToken,
@@ -196,6 +197,15 @@ export const acceptInvite = async (input: AcceptInviteInput) => {
         currentInvite.expiresAt <= now
       ) {
         throw invalidInvite();
+      }
+
+      if (currentInvite.role === "TEACHER") {
+        await assertWithinPlanLimit(
+          transaction,
+          currentInvite.centerId,
+          "teachers",
+          { excludedInviteId: currentInvite.id },
+        );
       }
 
       const existingUser = await transaction.user.findUnique({

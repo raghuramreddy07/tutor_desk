@@ -744,6 +744,7 @@ describe("academic tenant isolation", () => {
         "Attendance",
         "Exam",
         "ExamResult",
+        "Notification",
       ]),
     );
     expect(policies.every(({ enabled, forced }) => enabled && forced)).toBe(true);

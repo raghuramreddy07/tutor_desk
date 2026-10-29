@@ -199,6 +199,10 @@ beforeAll(async () => {
 
   centerA = await signup("A");
   centerB = await signup("B");
+  await ownerPrisma.center.updateMany({
+    where: { id: { in: [centerA.centerId, centerB.centerId] } },
+    data: { plan: "PRO" },
+  });
   const [studentA, studentB] = await Promise.all([
     ownerPrisma.student.create({
       data: { centerId: centerA.centerId, name: "Roles student A" },

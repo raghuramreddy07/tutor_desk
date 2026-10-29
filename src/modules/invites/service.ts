@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { InviteRole, Prisma, type Role } from "@prisma/client";
 import { env } from "../../config/env";
 import { withTenant } from "../../lib/tenantDb";
+import { assertWithinPlanLimit } from "../../lib/planLimits";
 import { AppError } from "../../middleware/errors";
 import type { CreateInviteInput } from "./schemas";
 
@@ -40,6 +41,9 @@ export const createInvite = async (
 
   try {
     return await withTenant(centerId, async (transaction) => {
+      if (input.role === InviteRole.TEACHER) {
+        await assertWithinPlanLimit(transaction, centerId, "teachers");
+      }
       if (input.role === InviteRole.PARENT) {
         const student = await transaction.student.findFirst({
           where: { id: input.studentId, centerId },
