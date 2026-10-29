@@ -205,6 +205,9 @@ afterAll(async () => {
     await ownerPrisma.exam.deleteMany({
       where: { centerId: { in: centerIds } },
     });
+    await ownerPrisma.auditLog.deleteMany({
+      where: { centerId: { in: centerIds } },
+    });
     await ownerPrisma.center.deleteMany({ where: { id: { in: centerIds } } });
   }
   if (userEmails.length > 0) {
@@ -745,6 +748,8 @@ describe("academic tenant isolation", () => {
         "Exam",
         "ExamResult",
         "Notification",
+        "AuditLog",
+        "JobOutbox",
       ]),
     );
     expect(policies.every(({ enabled, forced }) => enabled && forced)).toBe(true);

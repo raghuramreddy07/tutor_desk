@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { AppError } from "./errors";
 import { centerRateLimit, enforceRateLimitsOnce } from "./rateLimit";
 import { PLAN_LIMITS } from "../config/plans";
+import { updateRequestActor } from "../lib/requestContext";
 
 export const tenantMiddleware: RequestHandler = async (req, res, next) => {
   const membership = await prisma.membership.findUnique({
@@ -27,6 +28,7 @@ export const tenantMiddleware: RequestHandler = async (req, res, next) => {
   }
 
   req.auth.role = membership.role;
+  updateRequestActor(req);
   await enforceRateLimitsOnce(
     req,
     res,

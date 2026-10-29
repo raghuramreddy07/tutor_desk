@@ -2,15 +2,15 @@ import type {
   NotificationMessage,
   NotificationProvider,
 } from "./provider";
+import { logger } from "../logger";
 
 export class LogNotificationProvider implements NotificationProvider {
   async send(message: NotificationMessage): Promise<void> {
-    console.info("TutorDesk fee reminder notification", {
+    logger.info({
       notificationId: message.notificationId,
       centerId: message.centerId,
-      studentId: message.studentId,
-      parentUserId: message.parentUserId,
-      payload: message.payload,
-    });
+      jobId: message.jobId,
+      jobName: message.jobName,
+    }, "TutorDesk fee reminder notification");
   }
 }

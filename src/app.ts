@@ -1,4 +1,6 @@
-import express from "express";
+import express, { type Router } from "express";
+import cors from "cors";
+import helmet from "helmet";
 import { prisma } from "./lib/prisma";
 import { globalErrorHandler, notFound } from "./middleware/errors";
 import { authRoutes } from "./modules/auth/routes";
@@ -19,24 +21,50 @@ import { notificationRoutes } from "./modules/notifications/routes";
 import { jobRoutes } from "./modules/jobs/routes";
 import { env } from "./config/env";
 import { globalIpRateLimit } from "./middleware/rateLimit";
+import { requestContextMiddleware } from "./lib/requestContext";
+import { auditRoutes } from "./modules/audit/routes";
+import { requestLogger } from "./middleware/logging";
+import { checkReadiness } from "./lib/databaseReadiness";
+import { docsRoutes } from "./modules/docs/routes";
 
 export const app = express();
 
 app.set("trust proxy", env.TRUST_PROXY);
+app.use(requestContextMiddleware);
+app.use(requestLogger);
+app.use(helmet());
+const allowedOrigins = new Set(
+  env.CORS_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean),
+);
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      callback(null, origin === undefined || allowedOrigins.has(origin));
+    },
+    exposedHeaders: [
+      "RateLimit-Limit",
+      "RateLimit-Remaining",
+      "RateLimit-Reset",
+      "Retry-After",
+      "X-Request-Id",
+    ],
+  }),
+);
 app.use(globalIpRateLimit);
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
 
-app.get("/health", async (_req, res) => {
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    res.status(200).json({ status: "ok", db: "up" });
-  } catch (error) {
-    console.error("Health check database query failed:", error);
-    res.status(503).json({ status: "error", db: "down" });
-  }
+app.get("/health", (_req, res) => {
+  res.status(200).json({ status: "ok" });
 });
 
-app.use("/auth", authRoutes);
+app.get("/ready", async (_req, res) => {
+  const checks = await checkReadiness();
+  const ready = checks.database && checks.redis;
+  res.status(ready ? 200 : 503).json({
+    status: ready ? "ready" : "not_ready",
+    checks,
+  });
+});
 
 app.get("/me", authMiddleware, tenantMiddleware, async (req, res) => {
   const [user, center] = await Promise.all([
@@ -53,21 +81,37 @@ app.get("/me", authMiddleware, tenantMiddleware, async (req, res) => {
   res.status(200).json({ user, center, role: req.auth.role });
 });
 
-app.use("/students", studentRoutes);
-app.use("/students", studentFeeRoutes);
-app.use("/invites", inviteRoutes);
-app.use("/members", memberRoutes);
-app.use("/batches", batchRoutes);
-app.use(attendanceRoutes);
-app.use(examRoutes);
-app.use("/fee-plans", feePlanRoutes);
-app.use("/fees", feeRoutes);
-app.use("/payments", paymentRoutes);
-app.use("/parent", parentRoutes);
-app.use("/plan", planRoutes);
-app.use("/notifications", notificationRoutes);
-app.use("/jobs", jobRoutes);
+type RouteMount = { prefix?: string; router: Router };
 
+export const moduleRouteMounts: RouteMount[] = [
+  { prefix: "/auth", router: authRoutes },
+  { prefix: "/students", router: studentRoutes },
+  { prefix: "/students", router: studentFeeRoutes },
+  { prefix: "/invites", router: inviteRoutes },
+  { prefix: "/members", router: memberRoutes },
+  { prefix: "/batches", router: batchRoutes },
+  { router: attendanceRoutes },
+  { router: examRoutes },
+  { prefix: "/fee-plans", router: feePlanRoutes },
+  { prefix: "/fees", router: feeRoutes },
+  { prefix: "/payments", router: paymentRoutes },
+  { prefix: "/parent", router: parentRoutes },
+  { prefix: "/plan", router: planRoutes },
+  { prefix: "/notifications", router: notificationRoutes },
+  { prefix: "/jobs", router: jobRoutes },
+  { prefix: "/audit-logs", router: auditRoutes },
+];
+
+for (const mount of moduleRouteMounts) {
+  if (mount.prefix) {
+    app.use(mount.prefix, mount.router);
+  } else {
+    app.use(mount.router);
+  }
+}
+if (env.ENABLE_DOCS) {
+  app.use("/docs", docsRoutes);
+}
 
 app.use(notFound);
 app.use(globalErrorHandler);

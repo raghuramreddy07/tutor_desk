@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type { Express } from "express";
+import { PrismaClient } from "@prisma/client";
 import jwt from "jsonwebtoken";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 let app: Express;
 let prisma: typeof import("../src/lib/prisma").prisma;
+let ownerPrisma: PrismaClient;
 const userIds: string[] = [];
 const centerIds: string[] = [];
 const emailForRun = `auth-${randomUUID()}@example.test`;
@@ -14,23 +16,33 @@ const password = "correct horse battery";
 beforeAll(async () => {
   process.env.NODE_ENV = "test";
   process.env.DATABASE_URL ??=
+    "******localhost:5433/tutor_desk?schema=public";
+  process.env.DIRECT_URL ??=
     "postgresql://tutordesk:tutordesk_dev_password@localhost:5433/tutor_desk?schema=public";
   process.env.JWT_SECRET ??= "test-jwt-secret-that-is-at-least-32-chars";
   process.env.APP_URL ??= "http://localhost:3000";
 
   ({ app } = await import("../src/app"));
   ({ prisma } = await import("../src/lib/prisma"));
-  await prisma.$connect();
+  ownerPrisma = new PrismaClient({
+    datasources: { db: { url: process.env.DIRECT_URL } },
+  });
+  await Promise.all([prisma.$connect(), ownerPrisma.$connect()]);
 });
 
 afterAll(async () => {
+  if (centerIds.length > 0) {
+    await ownerPrisma.auditLog.deleteMany({
+      where: { centerId: { in: centerIds } },
+    });
+  }
   if (userIds.length > 0) {
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
   }
   if (centerIds.length > 0) {
     await prisma.center.deleteMany({ where: { id: { in: centerIds } } });
   }
-  await prisma.$disconnect();
+  await Promise.all([prisma.$disconnect(), ownerPrisma.$disconnect()]);
 });
 
 const registerCenter = async (email = emailForRun, centerName = "Auth Test Center") => {

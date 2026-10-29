@@ -14,6 +14,7 @@ import type {
   OverdueQuery,
   UpdateStudentFeeInput,
 } from "./schemas";
+import { recordAudit } from "../../lib/audit";
 
 const feeBalancesCte = (centerId: string) => Prisma.sql`
   WITH paid AS (
@@ -199,6 +200,16 @@ export const createStudentFee = (
         },
       },
     });
+    await recordAudit(transaction, {
+      centerId,
+      action: "fee_assignment.changed",
+      entityType: "StudentFee",
+      entityId: studentFee.id,
+      metadata: {
+        studentId,
+        changedFields: ["feePlanId", "customAmountPaise", "startDate", "endDate"],
+      },
+    });
     return serializeStudentFee(studentFee);
   });
 
@@ -317,6 +328,13 @@ export const updateStudentFee = (
           : {}),
       },
     });
+    await recordAudit(transaction, {
+      centerId,
+      action: "fee_assignment.changed",
+      entityType: "StudentFee",
+      entityId: studentFeeId,
+      metadata: { studentId, changedFields: Object.keys(input) },
+    });
     const studentFee = await transaction.studentFee.findFirstOrThrow({
       where: { id: studentFeeId, centerId, studentId },
       include: {
@@ -368,6 +386,13 @@ export const deleteStudentFee = (
       await transaction.studentFee.deleteMany({
         where: { id: studentFeeId, centerId, studentId },
       });
+      await recordAudit(transaction, {
+        centerId,
+        action: "fee_assignment.ended",
+        entityType: "StudentFee",
+        entityId: studentFeeId,
+        metadata: { studentId, changedFields: ["deleted"] },
+      });
       return { removed: true, endDate: null };
     }
 
@@ -385,6 +410,13 @@ export const deleteStudentFee = (
     await transaction.studentFee.updateMany({
       where: { id: studentFeeId, centerId, studentId },
       data: { endDate: calendarDateToUtc(endDate) },
+    });
+    await recordAudit(transaction, {
+      centerId,
+      action: "fee_assignment.ended",
+      entityType: "StudentFee",
+      entityId: studentFeeId,
+      metadata: { studentId, changedFields: ["endDate"] },
     });
     return { removed: false, endDate };
   });
@@ -497,6 +529,16 @@ export const generateFeeCharges = (centerId: string, month: string) =>
     `;
     const createdCount = Number(results[0]?.createdCount ?? 0n);
     const candidateCount = Number(results[0]?.candidateCount ?? 0n);
+    await recordAudit(transaction, {
+      centerId,
+      action: "charges.generated",
+      entityType: "FeeCharge",
+      metadata: {
+        month,
+        createdCount,
+        alreadyExistedCount: candidateCount - createdCount,
+      },
+    });
     return {
       month,
       created: createdCount,
@@ -547,6 +589,14 @@ export const waiveFeeCharge = (
     const updated = await transaction.feeCharge.findFirstOrThrow({
       where: { id: chargeId, centerId },
     });
+    await recordAudit(transaction, {
+      centerId,
+      actorUserId: userId,
+      action: "charge.waived",
+      entityType: "FeeCharge",
+      entityId: chargeId,
+      metadata: { changedFields: ["waivedAt", "waivedByUserId"] },
+    });
     return { ...updated, amountPaise: paiseToJson(updated.amountPaise) };
   });
 
@@ -568,6 +618,13 @@ export const unwaiveFeeCharge = (centerId: string, chargeId: string) =>
     }
     const charge = await transaction.feeCharge.findFirstOrThrow({
       where: { id: chargeId, centerId },
+    });
+    await recordAudit(transaction, {
+      centerId,
+      action: "charge.unwaived",
+      entityType: "FeeCharge",
+      entityId: chargeId,
+      metadata: { changedFields: ["waivedAt", "waivedByUserId"] },
     });
     return { ...charge, amountPaise: paiseToJson(charge.amountPaise) };
   });

@@ -9,6 +9,7 @@ import type {
   SetBatchTeachersInput,
   UpdateBatchInput,
 } from "./schemas";
+import { recordAudit } from "../../lib/audit";
 
 export type BatchActor = {
   centerId: string;
@@ -141,6 +142,12 @@ export const deleteBatch = (centerId: string, batchId: string) =>
       });
     }
     await transaction.batch.deleteMany({ where: { id: batchId, centerId } });
+    await recordAudit(transaction, {
+      centerId,
+      action: "batch.deleted",
+      entityType: "Batch",
+      entityId: batchId,
+    });
   });
 
 export const setBatchTeachers = async (

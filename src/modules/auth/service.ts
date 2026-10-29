@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { withInviteToken } from "../../lib/tenantDb";
 import { assertWithinPlanLimit } from "../../lib/planLimits";
+import { recordAudit } from "../../lib/audit";
 import {
   createAccessToken,
   createSelectionToken,
@@ -51,6 +52,18 @@ export const signupCenter = async (input: SignupCenterInput) => {
           centerId: center.id,
           role: "OWNER",
         },
+      });
+      await transaction.$queryRaw`
+        SELECT set_config('app.current_center', ${center.id}, true)
+      `;
+      await recordAudit(transaction, {
+        centerId: center.id,
+        actorUserId: user.id,
+        actorRole: "OWNER",
+        action: "signup-center",
+        entityType: "Center",
+        entityId: center.id,
+        metadata: { created: ["center", "owner_membership"] },
       });
 
       return { user, center };
@@ -272,6 +285,15 @@ export const acceptInvite = async (input: AcceptInviteInput) => {
       const center = await transaction.center.findUniqueOrThrow({
         where: { id: currentInvite.centerId },
         select: { id: true, name: true },
+      });
+      await recordAudit(transaction, {
+        centerId: currentInvite.centerId,
+        actorUserId: userId,
+        actorRole: currentInvite.role,
+        action: "invite.accepted",
+        entityType: "Invite",
+        entityId: currentInvite.id,
+        metadata: { role: currentInvite.role },
       });
 
       return {

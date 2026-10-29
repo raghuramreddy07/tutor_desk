@@ -423,6 +423,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   for (const id of centerIds) {
+    await ownerPrisma.auditLog.deleteMany({ where: { centerId: id } });
     await ownerPrisma.paymentAllocation.deleteMany({ where: { centerId: id } });
     await ownerPrisma.payment.deleteMany({ where: { centerId: id } });
     await ownerPrisma.feeCharge.deleteMany({ where: { centerId: id } });

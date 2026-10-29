@@ -5,6 +5,7 @@ import { requireRole } from "../../middleware/requireRole";
 import { tenantMiddleware } from "../../middleware/tenant";
 import { getPlan, updatePlan } from "./service";
 import { updatePlanSchema } from "./schemas";
+import { env } from "../../config/env";
 
 export const planRoutes = Router();
 
@@ -18,6 +19,9 @@ planRoutes.get("/", (async (req, res) => {
 }) satisfies RequestHandler);
 
 planRoutes.patch("/", (async (req, res) => {
+  if (!env.ALLOW_SELF_SERVICE_PLAN_CHANGE) {
+    throw new AppError(404, "NOT_FOUND", "Route not found");
+  }
   const parsed = updatePlanSchema.safeParse(req.body);
   if (!parsed.success) {
     throw validationError();

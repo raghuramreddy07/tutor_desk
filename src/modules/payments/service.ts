@@ -4,6 +4,7 @@ import { parsePaise, paiseToJson } from "../../lib/money";
 import { withTenant } from "../../lib/tenantDb";
 import { AppError } from "../../middleware/errors";
 import type { CreatePaymentInput, PaymentListQuery } from "./schemas";
+import { recordAudit } from "../../lib/audit";
 
 const serializePayment = <
   T extends {
@@ -387,6 +388,18 @@ export const createPayment = async (
         },
         select: { id: true },
       });
+      await recordAudit(transaction, {
+        centerId,
+        actorUserId: recordedByUserId,
+        action: "payment.recorded",
+        entityType: "Payment",
+        entityId: payment.id,
+        metadata: {
+          amountPaise: amountPaise.toString(),
+          allocationCount: allocations.length,
+          changedFields: ["amountPaise", "paidOn", "method", "allocations"],
+        },
+      });
       return {
         payment: await paymentDetails(transaction, centerId, payment.id),
         replayed: false,
@@ -518,5 +531,13 @@ export const voidPayment = async (
     if (updated.count === 0) {
       throw new AppError(409, "PAYMENT_ALREADY_VOIDED", "Payment is already voided");
     }
+    await recordAudit(transaction, {
+      centerId,
+      actorUserId: userId,
+      action: "payment.voided",
+      entityType: "Payment",
+      entityId: paymentId,
+      metadata: { changedFields: ["voidedAt", "voidedByUserId"] },
+    });
     return paymentDetails(transaction, centerId, paymentId);
   });

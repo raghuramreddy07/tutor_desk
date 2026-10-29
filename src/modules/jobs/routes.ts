@@ -2,8 +2,11 @@ import { Router, type RequestHandler } from "express";
 import { authMiddleware } from "../../middleware/auth";
 import { requireRole } from "../../middleware/requireRole";
 import { tenantMiddleware } from "../../middleware/tenant";
-import { enqueueCenterJobs } from "../../jobs/enqueueCenterJobs";
 import { createRateLimitMiddleware } from "../../middleware/rateLimit";
+import {
+  createRunNowRequest,
+  dispatchRunNowRequest,
+} from "../../jobs/outbox";
 
 export const jobRoutes = Router();
 
@@ -29,7 +32,15 @@ jobRoutes.post(
   requireRole("OWNER"),
   runNowRateLimit,
   (async (req, res) => {
-    const jobs = await enqueueCenterJobs(req.auth.centerId);
-    res.status(202).json({ jobs });
+    const outboxRequest = await createRunNowRequest(req.auth.centerId);
+    const dispatched = await dispatchRunNowRequest(
+      req.auth.centerId,
+      outboxRequest.id,
+    );
+    res.status(202).json({
+      runId: outboxRequest.id,
+      status: dispatched.status,
+      jobs: dispatched.jobs ?? null,
+    });
   }) satisfies RequestHandler,
 );

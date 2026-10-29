@@ -3,63 +3,84 @@ import { env } from "./config/env";
 import { JOB_QUEUE_NAME } from "./jobs/queues";
 import { processJob } from "./jobs/processors";
 import { registerDailySchedule } from "./jobs/scheduler";
+import { dispatchPendingRunNowRequests } from "./jobs/outbox";
 import { prisma } from "./lib/prisma";
 import { redis } from "./lib/redis";
+import { logger } from "./lib/logger";
+import { verifyProductionDatabaseRole } from "./lib/productionDatabaseCheck";
 
 const worker = new Worker(JOB_QUEUE_NAME, processJob, {
   connection: redis.duplicate(),
   concurrency: 5,
 });
+let outboxPollTimer: NodeJS.Timeout | undefined;
 
 worker.on("failed", (job, error) => {
-  console.error("TutorDesk background job failed", {
-    jobId: job?.id,
-    jobName: job?.name,
+  logger.error({
+    jobId: job?.id ?? null,
+    jobName: job?.name ?? "unknown",
+    centerId:
+      typeof job?.data?.centerId === "string" ? job.data.centerId : null,
     attemptsMade: job?.attemptsMade,
-    error,
-  });
+    err: error,
+  }, "TutorDesk background job failed");
 });
 
 worker.on("error", (error) => {
-  console.error("TutorDesk worker error:", error);
+  logger.error({ err: error }, "TutorDesk worker error");
 });
 
 const start = async (): Promise<void> => {
+  await verifyProductionDatabaseRole();
   await registerDailySchedule();
-  console.log(
-    `TutorDesk worker started; daily schedule ${env.JOB_SCHEDULE_CRON} (${env.NODE_ENV === "test" ? "test" : "Asia/Kolkata"})`,
-  );
+  await dispatchPendingRunNowRequests();
+  outboxPollTimer = setInterval(() => {
+    void dispatchPendingRunNowRequests().catch((error: unknown) => {
+      logger.error({ err: error }, "Could not poll the run-now outbox");
+    });
+  }, 15_000);
+  logger.info({
+    jobName: "daily-center-fanout",
+    schedule: env.JOB_SCHEDULE_CRON,
+    timeZone: env.NODE_ENV === "test" ? "test" : "Asia/Kolkata",
+  }, "TutorDesk worker started");
 };
 
 let closing: Promise<void> | undefined;
 const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
   closing ??= (async () => {
-    console.log(`${signal} received; closing background worker`);
+    logger.info({ signal }, "Closing background worker");
+    if (outboxPollTimer) {
+      clearInterval(outboxPollTimer);
+    }
     await worker.close();
     await redis.quit();
     await prisma.$disconnect();
-    console.log("TutorDesk worker shutdown complete");
+    logger.info("TutorDesk worker shutdown complete");
   })();
   await closing;
 };
 
 process.on("SIGINT", (signal) => {
   void shutdown(signal).catch((error: unknown) => {
-    console.error("Worker shutdown failed:", error);
+    logger.error({ err: error }, "Worker shutdown failed");
     process.exitCode = 1;
   });
 });
 process.on("SIGTERM", (signal) => {
   void shutdown(signal).catch((error: unknown) => {
-    console.error("Worker shutdown failed:", error);
+    logger.error({ err: error }, "Worker shutdown failed");
     process.exitCode = 1;
   });
 });
 
 void start().catch((error: unknown) => {
-  console.error("Could not start TutorDesk worker:", error);
+  logger.fatal({ err: error }, "Could not start TutorDesk worker");
   process.exitCode = 1;
   void shutdown("SIGTERM").catch((shutdownError: unknown) => {
-    console.error("Worker cleanup after startup failure failed:", shutdownError);
+    logger.error(
+      { err: shutdownError },
+      "Worker cleanup after startup failure failed",
+    );
   });
 });

@@ -184,6 +184,9 @@ afterAll(async () => {
     await ownerPrisma.centerCounter.deleteMany({
       where: { centerId: { in: centerIds } },
     });
+    await ownerPrisma.auditLog.deleteMany({
+      where: { centerId: { in: centerIds } },
+    });
     await ownerPrisma.center.deleteMany({ where: { id: { in: centerIds } } });
   }
   if (userEmails.length > 0) {
@@ -264,6 +267,24 @@ describe("fee plans, assignments, and charge generation", () => {
       .patch(`/fee-plans/${duplicatePlan.body.feePlan.id}`)
       .send({ isActive: false });
     expect(deactivated.status).toBe(200);
+
+    const removablePlan = await createPlan(centerA, {
+      batchId: batchAId,
+      name: "Removable audit plan",
+      amountPaise: "1000",
+    });
+    const removedPlan = await authorized(centerA).delete(
+      `/fee-plans/${removablePlan.body.feePlan.id}`,
+    );
+    expect(removedPlan.status).toBe(204);
+    expect(
+      await ownerPrisma.auditLog.count({
+        where: {
+          centerId: centerA.centerId,
+          action: { in: ["fee_plan.created", "fee_plan.changed", "fee_plan.deleted"] },
+        },
+      }),
+    ).toBeGreaterThanOrEqual(4);
   });
 
   it("assigns fees only to enrolled students and rejects overlapping assignments", async () => {
@@ -333,6 +354,16 @@ describe("fee plans, assignments, and charge generation", () => {
     );
     expect(removed.status).toBe(200);
     expect(removed.body.removed).toBe(true);
+    const assignmentAuditActions = await ownerPrisma.auditLog.findMany({
+      where: {
+        centerId: centerA.centerId,
+        entityId: assignment.body.studentFee.id,
+      },
+      select: { action: true },
+    });
+    expect(assignmentAuditActions.map(({ action }) => action)).toEqual(
+      expect.arrayContaining(["fee_assignment.changed", "fee_assignment.ended"]),
+    );
 
     await authorized(centerA)
       .patch(`/fee-plans/${planId}`)
@@ -491,6 +522,20 @@ describe("fee plans, assignments, and charge generation", () => {
       .send({});
     expect(unwaived.status).toBe(200);
     expect(unwaived.body.charge.waivedAt).toBeNull();
+    expect(
+      await ownerPrisma.auditLog.count({
+        where: {
+          centerId: centerA.centerId,
+          entityId: charge.id,
+          action: { in: ["charge.waived", "charge.unwaived"] },
+        },
+      }),
+    ).toBe(2);
+    expect(
+      await ownerPrisma.auditLog.count({
+        where: { centerId: centerA.centerId, action: "charges.generated" },
+      }),
+    ).toBeGreaterThan(0);
   });
 
   it("limits deletion of students with financial history and protects center isolation", async () => {
@@ -680,6 +725,15 @@ describe("fee plans, assignments, and charge generation", () => {
       .send({ reason: "Payment entered in error" });
     expect(voided.status).toBe(200);
     expect(voided.body.payment.voidReason).toBe("Payment entered in error");
+    expect(
+      await ownerPrisma.auditLog.count({
+        where: {
+          centerId: centerA.centerId,
+          entityId: first.body.payment.id,
+          action: { in: ["payment.recorded", "payment.voided"] },
+        },
+      }),
+    ).toBe(2);
     const doubleVoid = await authorized(centerA)
       .post(`/payments/${first.body.payment.id}/void`)
       .send({ reason: "Repeated void attempt" });

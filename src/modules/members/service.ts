@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { AppError } from "../../middleware/errors";
 import { withTenant } from "../../lib/tenantDb";
 import type { UpdateMemberInput } from "./schemas";
+import { recordAudit } from "../../lib/audit";
 
 const memberNotFound = (): AppError =>
   new AppError(404, "NOT_FOUND", "Member not found");
@@ -79,6 +80,16 @@ export const updateMember = (
       where: { userId_centerId: { userId, centerId } },
       data: { role: input.role },
     });
+    await recordAudit(transaction, {
+      centerId,
+      action: "member.role_changed",
+      entityType: "Membership",
+      entityId: userId,
+      metadata: {
+        fromRole: membership.role,
+        toRole: input.role,
+      },
+    });
 
     return transaction.membership.findUniqueOrThrow({
       where: { userId_centerId: { userId, centerId } },
@@ -111,5 +122,12 @@ export const removeMember = (centerId: string, userId: string) =>
     });
     await transaction.membership.delete({
       where: { userId_centerId: { userId, centerId } },
+    });
+    await recordAudit(transaction, {
+      centerId,
+      action: "member.removed",
+      entityType: "Membership",
+      entityId: userId,
+      metadata: { removedRole: membership.role },
     });
   });

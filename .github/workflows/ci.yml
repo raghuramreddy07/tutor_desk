@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: tutordesk
+          POSTGRES_PASSWORD: tutor_desk_ci_owner
+          POSTGRES_DB: tutor_desk
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tutordesk -d tutor_desk"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://tutordesk_app:app_ci_password@localhost:5432/tutor_desk?schema=public
+      DIRECT_URL: postgresql://tutordesk:tutor_desk_ci_owner@localhost:5432/tutor_desk?schema=public
+      APP_URL: http://localhost:3000
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: test-jwt-secret-that-is-at-least-32-chars
+      JWT_EXPIRES_IN: 1d
+      RATE_LIMIT_ENABLED: "true"
+      TRUST_PROXY: "true"
+      CORS_ORIGINS: http://localhost:3000
+      LOG_LEVEL: silent
+      TUTORDESK_APP_PASSWORD: app_ci_password
+      POSTGRES_PASSWORD: tutor_desk_ci_owner
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Provision the limited application database role
+        run: node scripts/provision-app-role.cjs
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Deploy migrations with the owner URL
+        run: npx prisma migrate deploy
+
+      - name: Check database schema drift
+        run: npm run db:diff
+
+      - name: Run tenant RLS tests
+        run: npm run test:rls
+
+      - name: Run the complete test suite
+        run: npx vitest run
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Build the production container
+        run: docker build --tag tutordesk-api:ci .
+
+      - name: Verify the container runs as a non-root user
+        run: >-
+          docker run --rm --entrypoint node tutordesk-api:ci
+          -e "process.exit(process.getuid() === 0 ? 1 : 0)"

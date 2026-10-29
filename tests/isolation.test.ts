@@ -98,6 +98,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (centerIds.length > 0) {
+    await ownerPrisma.auditLog.deleteMany({
+      where: { centerId: { in: centerIds } },
+    });
     await ownerPrisma.center.deleteMany({
       where: { id: { in: centerIds } },
     });

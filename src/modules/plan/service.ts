@@ -6,6 +6,7 @@ import {
 } from "../../lib/planLimits";
 import { withTenant } from "../../lib/tenantDb";
 import { AppError } from "../../middleware/errors";
+import { recordAudit } from "../../lib/audit";
 
 export const getPlan = (centerId: string) =>
   withTenant(centerId, (transaction) =>
@@ -32,6 +33,18 @@ export const updatePlan = (centerId: string, requestedPlan: "FREE" | "PRO") =>
       where: { id: centerId },
       data: { plan: requestedPlan },
     });
+    if (current.plan !== requestedPlan) {
+      await recordAudit(transaction, {
+        centerId,
+        action: "plan.changed",
+        entityType: "Center",
+        entityId: centerId,
+        metadata: {
+          fromPlan: current.plan,
+          toPlan: requestedPlan,
+        },
+      });
+    }
     return {
       plan: requestedPlan,
       limits: PLAN_LIMITS[requestedPlan],

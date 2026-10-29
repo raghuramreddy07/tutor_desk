@@ -3,6 +3,7 @@ import { withTenant } from "../../lib/tenantDb";
 import { parsePaise, paiseToJson } from "../../lib/money";
 import { AppError } from "../../middleware/errors";
 import type { CreateFeePlanInput, UpdateFeePlanInput } from "./schemas";
+import { recordAudit } from "../../lib/audit";
 
 const planSelect = {
   id: true,
@@ -42,6 +43,13 @@ export const createFeePlan = (centerId: string, input: CreateFeePlanInput) =>
         dueDay: input.frequency === "MONTHLY" ? input.dueDay ?? null : null,
       },
       select: planSelect,
+    });
+    await recordAudit(transaction, {
+      centerId,
+      action: "fee_plan.created",
+      entityType: "FeePlan",
+      entityId: plan.id,
+      metadata: { changedFields: ["name", "amountPaise", "frequency", "dueDay"] },
     });
     return serializePlan(plan);
   });
@@ -101,7 +109,13 @@ export const updateFeePlan = (
     }
     const existing = await transaction.feePlan.findFirstOrThrow({
       where: { id, centerId },
-      select: { frequency: true },
+      select: {
+        frequency: true,
+        name: true,
+        amountPaise: true,
+        dueDay: true,
+        isActive: true,
+      },
     });
     if (
       input.dueDay !== undefined &&
@@ -127,6 +141,13 @@ export const updateFeePlan = (
     const plan = await transaction.feePlan.findFirstOrThrow({
       where: { id, centerId },
       select: planSelect,
+    });
+    await recordAudit(transaction, {
+      centerId,
+      action: "fee_plan.changed",
+      entityType: "FeePlan",
+      entityId: id,
+      metadata: { changedFields: Object.keys(input) },
     });
     return serializePlan(plan);
   });
@@ -166,4 +187,10 @@ export const deleteFeePlan = (centerId: string, id: string) =>
       }
       throw error;
     }
+    await recordAudit(transaction, {
+      centerId,
+      action: "fee_plan.deleted",
+      entityType: "FeePlan",
+      entityId: id,
+    });
   });

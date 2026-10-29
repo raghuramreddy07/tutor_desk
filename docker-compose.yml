@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: tutordesk
-      POSTGRES_PASSWORD: tutordesk_dev_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: tutor_desk
       TUTORDESK_APP_PASSWORD: ${TUTORDESK_APP_PASSWORD:?Set TUTORDESK_APP_PASSWORD in .env}
     ports:
@@ -17,6 +17,59 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+  api:
+    profiles: ["application"]
+    build:
+      context: .
+      target: runtime
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: ${DOCKER_DATABASE_URL:?Set DOCKER_DATABASE_URL in .env}
+      DIRECT_URL: ${DOCKER_DIRECT_URL:?Set DOCKER_DIRECT_URL in .env}
+      REDIS_URL: redis://redis:6379
+    command:
+      [
+        "sh",
+        "-c",
+        "node scripts/provision-app-role.cjs && npx prisma migrate deploy && node dist/server.js",
+      ]
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+  worker:
+    profiles: ["application"]
+    build:
+      context: .
+      target: runtime
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: ${DOCKER_DATABASE_URL:?Set DOCKER_DATABASE_URL in .env}
+      DIRECT_URL: ${DOCKER_DIRECT_URL:?Set DOCKER_DIRECT_URL in .env}
+      REDIS_URL: redis://redis:6379
+    command: ["node", "dist/worker.js"]
+    depends_on:
+      api:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
   redis:
     image: redis:7-alpine
     restart: unless-stopped

@@ -14,6 +14,7 @@ import type {
   GenerateMonthlyChargesJob,
 } from "./queues";
 import { jobQueue } from "./queues";
+import { logger } from "../lib/logger";
 
 const notificationProvider: NotificationProvider = new LogNotificationProvider();
 
@@ -25,7 +26,7 @@ export const listCenterIdsForJobs = async (): Promise<string[]> => {
 };
 
 const enqueueDailyCenterJobs = async (
-  _job: Job<DailySchedulerJob>,
+  job: Job<DailySchedulerJob>,
 ): Promise<{ centers: number }> => {
   const centerIds = await listCenterIdsForJobs();
   const today = todayInBusinessTimeZone();
@@ -40,10 +41,12 @@ const enqueueDailyCenterJobs = async (
         { jobId: `charges-${centerId}-${month}` },
       );
     } catch (error) {
-      console.error("Could not enqueue monthly charge generation", {
+      logger.error({
         centerId,
-        error,
-      });
+        jobId: job.id,
+        jobName: job.name,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      }, "Could not enqueue monthly charge generation");
       failures.push(`charges:${centerId}`);
     }
 
@@ -54,7 +57,12 @@ const enqueueDailyCenterJobs = async (
         { jobId: `overdue-${centerId}-${today}` },
       );
     } catch (error) {
-      console.error("Could not enqueue overdue reminders", { centerId, error });
+      logger.error({
+        centerId,
+        jobId: job.id,
+        jobName: job.name,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      }, "Could not enqueue overdue reminders");
       failures.push(`overdue:${centerId}`);
     }
   }
@@ -198,6 +206,8 @@ const processOverdueReminders = async (job: Job<DetectOverdueJob>) => {
           studentId: notification.studentId,
           parentUserId: notification.parentUserId,
           payload: notification.payload as Record<string, unknown>,
+          jobId: job.id ?? "unknown",
+          jobName: job.name,
         });
         await withTenant(centerId, (transaction) =>
           transaction.notification.updateMany({

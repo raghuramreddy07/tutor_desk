@@ -3,7 +3,7 @@ import type { Job } from "bullmq";
 import type { Express } from "express";
 import { PrismaClient } from "@prisma/client";
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { listCenterIdsForJobs, processJob } from "../src/jobs/processors";
 import { jobQueue } from "../src/jobs/queues";
 import { registerDailySchedule } from "../src/jobs/scheduler";
@@ -85,6 +85,12 @@ afterAll(async () => {
       await job.remove();
     }
   }
+  await ownerPrisma.auditLog.deleteMany({
+    where: { centerId: { in: centerIds } },
+  });
+  await ownerPrisma.jobOutbox.deleteMany({
+    where: { centerId: { in: centerIds } },
+  });
   for (const centerId of centerIds) {
     await ownerPrisma.center.deleteMany({ where: { id: centerId } });
   }
@@ -443,10 +449,29 @@ describe("plan limits", () => {
     const app = await import("../src/app");
     const runNow = await authorized(otherCenter).post("/jobs/run-now").send({});
     expect(runNow.status).toBe(202);
+    expect(runNow.body.status).toBe("DISPATCHED");
     const { chargeJobId, overdueJobId } = runNow.body.jobs as {
       chargeJobId: string;
       overdueJobId: string;
     };
+    expect(
+      await ownerPrisma.auditLog.count({
+        where: {
+          centerId: otherCenter.centerId,
+          action: "job.run_now_triggered",
+        },
+      }),
+    ).toBe(1);
+    expect(
+      await ownerPrisma.jobOutbox.count({
+        where: {
+          centerId: otherCenter.centerId,
+          id: runNow.body.runId,
+          status: "DISPATCHED",
+          dispatchedAt: { not: null },
+        },
+      }),
+    ).toBe(1);
     queuedJobIds.push(chargeJobId, overdueJobId);
     for (const jobId of [chargeJobId, overdueJobId]) {
       const job = await jobQueue.getJob(jobId);
@@ -466,5 +491,47 @@ describe("plan limits", () => {
     const foreign = await authorized(freeCenter).get("/notifications");
     expect(foreign.body.total).toBe(0);
     expect(app.app).toBeTruthy();
+  });
+
+  it("keeps a run-now outbox request pending until Redis dispatch succeeds", async () => {
+    const queue = await import("../src/jobs/queues");
+    const outbox = await import("../src/jobs/outbox");
+    const addSpy = vi.spyOn(queue.jobQueue, "add").mockRejectedValue(
+      new Error("temporary Redis failure"),
+    );
+    const pending = await authorized(otherCenter).post("/jobs/run-now").send({});
+    expect(pending.status).toBe(202);
+    expect(pending.body.status).toBe("PENDING");
+    expect(pending.body.jobs).toBeNull();
+    expect(
+      await ownerPrisma.auditLog.count({
+        where: {
+          centerId: otherCenter.centerId,
+          entityId: pending.body.runId,
+          action: "job.run_now_triggered",
+        },
+      }),
+    ).toBe(1);
+    addSpy.mockRestore();
+
+    const retried = await outbox.dispatchRunNowRequest(
+      otherCenter.centerId,
+      pending.body.runId as string,
+    );
+    expect(retried.status).toBe("DISPATCHED");
+    expect(retried.jobs).toBeDefined();
+    queuedJobIds.push(
+      retried.jobs!.chargeJobId,
+      retried.jobs!.overdueJobId,
+    );
+    expect(
+      await ownerPrisma.jobOutbox.findUniqueOrThrow({
+        where: { id: pending.body.runId as string },
+        select: { status: true, dispatchedAt: true },
+      }),
+    ).toMatchObject({
+      status: "DISPATCHED",
+      dispatchedAt: expect.any(Date),
+    });
   });
 });

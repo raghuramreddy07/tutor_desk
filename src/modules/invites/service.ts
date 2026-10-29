@@ -3,6 +3,7 @@ import { InviteRole, Prisma, type Role } from "@prisma/client";
 import { env } from "../../config/env";
 import { withTenant } from "../../lib/tenantDb";
 import { assertWithinPlanLimit } from "../../lib/planLimits";
+import { recordAudit } from "../../lib/audit";
 import { AppError } from "../../middleware/errors";
 import type { CreateInviteInput } from "./schemas";
 
@@ -162,6 +163,15 @@ export const createInvite = async (
           createdAt: true,
         },
       });
+      await recordAudit(transaction, {
+        centerId,
+        actorUserId: invitedByUserId,
+        actorRole: inviterRole,
+        action: "invite.created",
+        entityType: "Invite",
+        entityId: invite.id,
+        metadata: { role: invite.role },
+      });
 
       return {
         alreadyMember: false,
@@ -236,4 +246,13 @@ export const revokeInvite = (
     if (result.count === 0) {
       throw new AppError(404, "NOT_FOUND", "Invite not found");
     }
+    await recordAudit(transaction, {
+      centerId,
+      actorUserId: requesterId,
+      actorRole: requesterRole,
+      action: "invite.revoked",
+      entityType: "Invite",
+      entityId: id,
+      metadata: { changedFields: ["revokedAt"] },
+    });
   });

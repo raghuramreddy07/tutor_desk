@@ -3,6 +3,8 @@ import type { Request, RequestHandler, Response } from "express";
 import { env } from "../config/env";
 import { redis } from "../lib/redis";
 import { AppError } from "./errors";
+import { logger } from "../lib/logger";
+import { getRequestContext } from "../lib/requestContext";
 
 export interface RateLimitStore {
   eval(
@@ -125,7 +127,15 @@ export const enforceRateLimits = async (
       }
 
       if ((rule.failureMode ?? "open") === "closed") {
-        console.error("Authentication rate-limit store is unavailable:", error);
+        const context = getRequestContext();
+        logger.error({
+          requestId: context?.requestId,
+          centerId: context?.centerId,
+          userId: context?.userId,
+          role: context?.role,
+          rule: rule.name,
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        }, "Authentication rate-limit store is unavailable");
         throw new AppError(
           503,
           "RATE_LIMIT_UNAVAILABLE",
@@ -133,7 +143,15 @@ export const enforceRateLimits = async (
         );
       }
 
-      console.error("Rate-limit store is unavailable; allowing request:", error);
+      const context = getRequestContext();
+      logger.warn({
+        requestId: context?.requestId,
+        centerId: context?.centerId,
+        userId: context?.userId,
+        role: context?.role,
+        rule: rule.name,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      }, "Rate-limit store is unavailable; allowing request");
     }
   }
 };

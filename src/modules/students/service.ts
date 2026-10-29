@@ -6,6 +6,7 @@ import type {
   ListStudentsQuery,
   UpdateStudentInput,
 } from "./schemas";
+import { recordAudit } from "../../lib/audit";
 
 const studentNotFound = (): AppError =>
   new AppError(404, "NOT_FOUND", "Student not found");
@@ -122,4 +123,10 @@ export const deleteStudent = (centerId: string, id: string) =>
     if (result.count === 0) {
       throw studentNotFound();
     }
+    await recordAudit(transaction, {
+      centerId,
+      action: "student.deleted",
+      entityType: "Student",
+      entityId: id,
+    });
   });

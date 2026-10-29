@@ -34,6 +34,12 @@ enum NotificationStatus {
   SKIPPED
 }
 
+enum JobOutboxStatus {
+  PENDING
+  DISPATCHING
+  DISPATCHED
+}
+
 enum InviteRole {
   TEACHER
   PARENT
@@ -73,6 +79,8 @@ model Center {
   paymentAllocations PaymentAllocation[]
   counters    CenterCounter[]
   notifications Notification[]
+  auditLogs   AuditLog[]
+  jobOutbox   JobOutbox[]
 }
 
 model Student {
@@ -406,4 +414,42 @@ model Notification {
   @@index([centerId])
   @@index([centerId, status, createdAt])
   @@index([centerId, studentId])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  centerId    String   @db.Uuid
+  actorUserId String?  @db.Uuid
+  actorRole   Role?
+  action      String
+  entityType  String
+  entityId    String?
+  metadata    Json
+  requestId   String?
+  ip          String?
+  createdAt   DateTime @default(now())
+  center      Center   @relation(fields: [centerId], references: [id], onDelete: Restrict)
+
+  @@index([centerId, createdAt])
+  @@index([centerId, action, createdAt])
+  @@index([centerId, entityType, entityId, createdAt])
+  @@index([centerId, actorUserId, createdAt])
+}
+
+model JobOutbox {
+  id          String          @id @default(uuid()) @db.Uuid
+  centerId    String          @db.Uuid
+  month       String
+  date        String
+  status      JobOutboxStatus @default(PENDING)
+  attempts    Int             @default(0)
+  lastError   String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  dispatchedAt DateTime?
+  center      Center          @relation(fields: [centerId], references: [id], onDelete: Restrict)
+
+  @@unique([centerId, id])
+  @@index([centerId])
+  @@index([centerId, status, createdAt])
 }

@@ -4,6 +4,8 @@ export type NotificationMessage = {
   studentId: string;
   parentUserId: string | null;
   payload: Record<string, unknown>;
+  jobId: string;
+  jobName: string;
 };
 
 export interface NotificationProvider {

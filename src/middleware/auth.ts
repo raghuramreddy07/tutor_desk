@@ -5,6 +5,7 @@ import {
   authenticatedUserRateLimit,
   enforceRateLimitsOnce,
 } from "./rateLimit";
+import { updateRequestActor } from "../lib/requestContext";
 
 export const authMiddleware: RequestHandler = async (req, res, next) => {
   const authorization = req.get("authorization");
@@ -28,6 +29,7 @@ export const authMiddleware: RequestHandler = async (req, res, next) => {
     centerId: payload.centerId,
     role: payload.role,
   };
+  updateRequestActor(req);
   await enforceRateLimitsOnce(
     req,
     res,
