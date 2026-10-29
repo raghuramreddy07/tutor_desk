@@ -127,14 +127,25 @@ const main = async () => {
       }
     }
 
-    // 7. Safety net: even if a group above is edited by mistake, these
-    //    protections always end up in place.
-    await prisma.$executeRaw`
-      REVOKE DELETE, TRUNCATE ON TABLE "Payment", "PaymentAllocation" FROM tutordesk_app
+    // 7. Safety net, only for tables that already exist.
+    const safetyNet = await prisma.$queryRaw`
+      SELECT format(
+        'REVOKE %s ON TABLE %I.%I FROM tutordesk_app',
+        CASE WHEN c.relname = 'AuditLog'
+             THEN 'UPDATE, DELETE, TRUNCATE'
+             ELSE 'DELETE, TRUNCATE' END,
+        n.nspname,
+        c.relname
+      ) AS statement
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public'
+        AND c.relkind IN ('r', 'p')
+        AND c.relname IN ('Payment', 'PaymentAllocation', 'AuditLog')
     `;
-    await prisma.$executeRaw`
-      REVOKE UPDATE, DELETE, TRUNCATE ON TABLE "AuditLog" FROM tutordesk_app
-    `;
+    for (const row of safetyNet) {
+      await prisma.$executeRawUnsafe(row.statement);
+    }
 
     process.stdout.write(
       `${JSON.stringify({

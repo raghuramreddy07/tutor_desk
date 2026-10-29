@@ -1,167 +1,90 @@
-require("dotenv/config");
+name: CI
 
-const { PrismaClient } = require("@prisma/client");
+on:
+  push:
+  pull_request:
 
-// Every table the app role may touch, with exactly the privileges it needs.
-// A table that is not listed here gets NO access (deny by default).
-// When you add a new table in a migration, add it to a group below.
-const grantGroups = [
-  {
-    privileges: "SELECT, INSERT, UPDATE, DELETE",
-    tables: [
-      "User",
-      "Center",
-      "Membership",
-      "Student",
-      "Invite",
-      "ParentStudent",
-      "Batch",
-      "BatchTeacher",
-      "BatchStudent",
-      "Attendance",
-      "Exam",
-      "ExamResult",
-      "FeePlan",
-      "StudentFee",
-      "FeeCharge",
-      "CenterCounter",
-      "Notification",
-    ],
-  },
-  // Money trail: payments are voided, never deleted.
-  {
-    privileges: "SELECT, INSERT, UPDATE",
-    tables: ["Payment", "PaymentAllocation"],
-  },
-  // Append-only audit trail.
-  { privileges: "SELECT, INSERT", tables: ["AuditLog"] },
-  // Outbox rows are inserted, read, and marked dispatched.
-  { privileges: "SELECT, INSERT, UPDATE", tables: ["JobOutbox"] },
-];
+permissions:
+  contents: read
 
-const main = async () => {
-  const directUrl = process.env.DIRECT_URL;
-  const appPassword = process.env.TUTORDESK_APP_PASSWORD;
-  if (!directUrl || !appPassword) {
-    throw new Error("DIRECT_URL and TUTORDESK_APP_PASSWORD are required");
-  }
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: tutordesk
+          POSTGRES_PASSWORD: tutor_desk_ci_owner
+          POSTGRES_DB: tutor_desk
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tutordesk -d tutor_desk"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://tutordesk:tutor_desk_ci_owner@localhost:5432/tutor_desk?schema=public
+      DIRECT_URL: postgresql://tutordesk:tutor_desk_ci_owner@localhost:5432/tutor_desk?schema=public
+      APP_URL: http://localhost:3000
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: test-jwt-secret-that-is-at-least-32-chars
+      JWT_EXPIRES_IN: 1d
+      RATE_LIMIT_ENABLED: "true"
+      TRUST_PROXY: "true"
+      CORS_ORIGINS: http://localhost:3000
+      LOG_LEVEL: silent
+      TUTORDESK_APP_PASSWORD: app_ci_password
+      POSTGRES_PASSWORD: tutor_desk_ci_owner
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
 
-  const prisma = new PrismaClient({
-    datasources: { db: { url: directUrl } },
-  });
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
 
-  try {
-    // 1. Create the role if it does not exist yet.
-    const createRole = await prisma.$queryRaw`
-      SELECT format(
-        'CREATE ROLE tutordesk_app LOGIN PASSWORD %L',
-        ${appPassword}
-      ) AS statement
-      WHERE NOT EXISTS (
-        SELECT 1 FROM pg_roles WHERE rolname = 'tutordesk_app'
-      )
-    `;
-    if (createRole[0]) {
-      await prisma.$executeRawUnsafe(createRole[0].statement);
-    }
+      - name: Install dependencies
+        run: npm ci
 
-    // 2. Always enforce the safe role settings (also fixes an existing role).
-    const roleSettings = await prisma.$queryRaw`
-      SELECT format(
-        'ALTER ROLE tutordesk_app WITH LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS',
-        ${appPassword}
-      ) AS statement
-    `;
-    await prisma.$executeRawUnsafe(roleSettings[0].statement);
+      - name: Provision the limited application database role
+        run: node scripts/provision-app-role.cjs
 
-    // 3. Connection and schema access.
-    const databaseGrant = await prisma.$queryRaw`
-      SELECT format(
-        'GRANT CONNECT ON DATABASE %I TO tutordesk_app',
-        current_database()
-      ) AS statement
-    `;
-    await prisma.$executeRawUnsafe(databaseGrant[0].statement);
-    await prisma.$executeRaw`
-      GRANT USAGE ON SCHEMA public TO tutordesk_app
-    `;
+      - name: Validate Prisma schema
+        run: npx prisma validate
 
-    // 4. Clean slate: remove every table privilege granted earlier, so old
-    //    or accidental grants cannot survive. Grants are rebuilt below.
-    await prisma.$executeRaw`
-      REVOKE ALL ON ALL TABLES IN SCHEMA public FROM tutordesk_app
-    `;
+      - name: Deploy migrations with the owner URL
+        run: npx prisma migrate deploy
 
-    // 5. Remove any default privileges left by earlier versions of this
-    //    script, so future tables do not get automatic access.
-    const resetDefaults = await prisma.$queryRaw`
-      SELECT format(
-        'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public REVOKE ALL ON TABLES FROM tutordesk_app',
-        current_user
-      ) AS statement
-    `;
-    await prisma.$executeRawUnsafe(resetDefaults[0].statement);
+      - name: Check database schema drift
+        run: npm run db:diff
 
-    // 6. Grant exactly what each table needs (skips tables that do not exist yet).
-    for (const group of grantGroups) {
-      for (const table of group.tables) {
-        const grants = await prisma.$queryRaw`
-          SELECT format(
-            'GRANT %s ON TABLE %I.%I TO tutordesk_app',
-            ${group.privileges},
-            n.nspname,
-            c.relname
-          ) AS statement
-          FROM pg_class c
-          JOIN pg_namespace n ON n.oid = c.relnamespace
-          WHERE n.nspname = 'public'
-            AND c.relname = ${table}
-            AND c.relkind IN ('r', 'p')
-        `;
-        if (grants[0]) {
-          await prisma.$executeRawUnsafe(grants[0].statement);
-        }
-      }
-    }
+      - name: Run tenant RLS tests
+        run: npm run test:rls
 
-    // 7. Safety net, only for tables that already exist.
-    const safetyNet = await prisma.$queryRaw`
-      SELECT format(
-        'REVOKE %s ON TABLE %I.%I FROM tutordesk_app',
-        CASE WHEN c.relname = 'AuditLog'
-             THEN 'UPDATE, DELETE, TRUNCATE'
-             ELSE 'DELETE, TRUNCATE' END,
-        n.nspname,
-        c.relname
-      ) AS statement
-      FROM pg_class c
-      JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = 'public'
-        AND c.relkind IN ('r', 'p')
-        AND c.relname IN ('Payment', 'PaymentAllocation', 'AuditLog')
-    `;
-    for (const row of safetyNet) {
-      await prisma.$executeRawUnsafe(row.statement);
-    }
+      - name: Run the complete test suite
+        run: npx vitest run
 
-    process.stdout.write(
-      `${JSON.stringify({
-        level: "info",
-        message: "tutordesk_app database role provisioned",
-      })}\n`,
-    );
-  } finally {
-    await prisma.$disconnect();
-  }
-};
+      - name: Build TypeScript
+        run: npm run build
 
-main().catch((error) => {
-  process.stderr.write(
-    `${JSON.stringify({
-      level: "error",
-      message: "Failed to provision tutordesk_app database role",
-      errorName: error instanceof Error ? error.name : "UnknownError",
-    })}\n`,
-  );
-  process.exitCode = 1;
-});
+      - name: Build the production container
+        run: docker build --tag tutordesk-api:ci .
+
+      - name: Verify the container runs as a non-root user
+        run: >-
+          docker run --rm --entrypoint node tutordesk-api:ci
+          -e "process.exit(process.getuid() === 0 ? 1 : 0)"
