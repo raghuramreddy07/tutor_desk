@@ -35,13 +35,15 @@ jobs:
           --health-retries 10
     env:
       NODE_ENV: test
-      DATABASE_URL: postgresql://tutordesk:tutor_desk_ci_owner@localhost:5432/tutor_desk?schema=public
+      # The running app and tests use the LIMITED role, so RLS applies.
+      DATABASE_URL: postgresql://tutordesk_app:app_ci_password@localhost:5432/tutor_desk?schema=public
+      # Migrations and role setup use the OWNER.
       DIRECT_URL: postgresql://tutordesk:tutor_desk_ci_owner@localhost:5432/tutor_desk?schema=public
       APP_URL: http://localhost:3000
       REDIS_URL: redis://localhost:6379
       JWT_SECRET: test-jwt-secret-that-is-at-least-32-chars
       JWT_EXPIRES_IN: 1d
-      RATE_LIMIT_ENABLED: "true"
+      RATE_LIMIT_ENABLED: "false"
       TRUST_PROXY: "true"
       CORS_ORIGINS: http://localhost:3000
       LOG_LEVEL: silent
@@ -60,14 +62,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Provision the limited application database role
-        run: node scripts/provision-app-role.cjs
+      - name: Generate Prisma client
+        run: npx prisma generate
 
       - name: Validate Prisma schema
         run: npx prisma validate
 
+      - name: Create the limited role (empty database)
+        run: node scripts/provision-app-role.cjs
+
       - name: Deploy migrations with the owner URL
         run: npx prisma migrate deploy
+
+      - name: Grant table privileges to the limited role
+        run: node scripts/provision-app-role.cjs
 
       - name: Check database schema drift
         run: npm run db:diff
