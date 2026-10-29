@@ -89,6 +89,7 @@ services:
     name: tutordesk-redis
     plan: starter
     maxmemoryPolicy: noeviction
+    ipAllowList: [] 
 
 databases:
   - name: tutordesk-postgres
